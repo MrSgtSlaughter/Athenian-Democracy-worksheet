@@ -937,7 +937,7 @@
       <!-- AI GRADER -->
       <div class="ai-grader-wrap" style="margin-top:1rem;">
         <button class="ai-grade-btn" id="gradeBtn" onclick="gradeParagraph()">
-          🤖 Check My Paragraph with AI
+          ✅ Check My Paragraph
         </button>
         <div id="grader-result">
           <div class="grade-header">
@@ -1095,9 +1095,108 @@ window.addEventListener('scroll', () => {
   document.getElementById('stickyBar').classList.toggle('visible', window.scrollY > 300);
 });
 
+// ══════════════════════════════════════════════
+// PARAGRAPH CHECKER — LOCAL KEYWORD DATABASE
+// No API calls — works instantly, no internet needed
+// ══════════════════════════════════════════════
+
+const PARA_CHECKS = [
+  {
+    id: 'opinion',
+    label: 'States a clear opinion',
+    required: true,
+    hint: 'Start your paragraph with a clear opinion sentence like "I believe representative democracy is better because..." or "I think direct democracy is the best system because..."',
+    // Must mention which type they prefer
+    test: t => {
+      const lower = t.toLowerCase();
+      const hasDirect = /direct democracy/i.test(t);
+      const hasRep    = /representative democracy|republic/i.test(t);
+      const hasOpinion = /i (think|believe|feel|argue|say)|in my opinion|i (prefer|choose|support)|better because|is the best|is better/i.test(t);
+      return (hasDirect || hasRep) && hasOpinion;
+    }
+  },
+  {
+    id: 'democracy_type',
+    label: 'Names direct OR representative democracy',
+    required: true,
+    hint: 'Make sure you mention "direct democracy" or "representative democracy" by name in your paragraph.',
+    test: t => /direct democracy|representative democracy|republic/i.test(t)
+  },
+  {
+    id: 'reason1',
+    label: 'Gives at least one reason',
+    required: true,
+    hint: 'Add a reason that explains WHY you prefer that type. Try using the word "because" to connect your opinion to a reason.',
+    test: t => /because|since|reason|therefore|this means|as a result|allows|helps|makes it|ensures|gives|provides/i.test(t)
+  },
+  {
+    id: 'reason2',
+    label: 'Gives a second reason',
+    required: true,
+    hint: 'Add a SECOND reason to support your opinion. You can start it with "Another reason is..." or "Also..." or "In addition..."',
+    test: t => {
+      const becauseCount = (t.match(/because|another reason|also,|in addition|furthermore|additionally|second(ly)?|first(ly)?/gi) || []).length;
+      return becauseCount >= 2;
+    }
+  },
+  {
+    id: 'sentences',
+    label: 'Has at least 5 sentences',
+    required: true,
+    hint: 'Your paragraph needs at least 5 sentences. Count the periods (.) in your paragraph — you need at least 5!',
+    test: t => {
+      const sentences = t.split(/[.!?]+/).filter(s => s.trim().length > 10);
+      return sentences.length >= 5;
+    }
+  },
+  {
+    id: 'vocab',
+    label: 'Uses at least 3 content vocabulary words',
+    required: true,
+    hint: 'Use more vocabulary from class! Try including words like: citizens, vote, elect, represent, laws, government, population, Congress, Athens, republic, or leader.',
+    test: t => {
+      const vocabWords = [
+        'citizen','citizens','vote','voting','voted','voter',
+        'elect','elected','election','elects',
+        'represent','representative','representatives','representation',
+        'law','laws','legislation','legislature',
+        'government','govern','governing',
+        'democracy','democratic','democracies',
+        'republic','republican',
+        'population','people',
+        'congress','senate','parliament',
+        'athens','athenian','greece','greek',
+        'united states','america','american',
+        'leader','leaders','leadership',
+        'decision','decisions','decide',
+        'fair','fairness','equal','equality',
+        'power','rights','freedom',
+        'city-state','city state','polis'
+      ];
+      const lower = t.toLowerCase();
+      const found = vocabWords.filter(w => lower.includes(w));
+      return found.length >= 3;
+    }
+  },
+  {
+    id: 'example',
+    label: 'References a real-world example',
+    required: false, // bonus — not required to pass
+    hint: 'Great paragraphs mention a real example like ancient Athens, the United States Congress, or the size of a country\'s population.',
+    test: t => /athens|united states|congress|u\.s\.|america|greece|ancient|today|modern|history|historical/i.test(t)
+  },
+  {
+    id: 'length',
+    label: 'At least 40 words written',
+    required: true,
+    hint: 'Your paragraph is too short. Keep writing — you need at least 40 words total.',
+    test: t => t.trim().split(/\s+/).filter(w => w.length > 0).length >= 40
+  }
+];
+
 // ── RESET GRADER when student edits paragraph ──
 function resetGrader() {
-  if (!paragraphPassed) return; // already not passed, no need to reset
+  if (!paragraphPassed) return;
   paragraphPassed = false;
   paragraphScore = 0;
   document.getElementById('grader-result').classList.remove('show');
@@ -1108,133 +1207,109 @@ function resetGrader() {
   btn.style.opacity = '0.45';
   btn.style.cursor = 'not-allowed';
   btn.textContent = '🔒 Complete Paragraph Check to Submit';
-  document.getElementById('gradeBtn').textContent = '🤖 Check My Paragraph with AI';
+  document.getElementById('gradeBtn').textContent = '✅ Check My Paragraph';
 }
 
-// ── AI PARAGRAPH GRADER ──
-async function gradeParagraph() {
+// ── LOCAL PARAGRAPH CHECKER ──
+function gradeParagraph() {
   const text = (document.getElementById('q13').value || '').trim();
-  if (text.length < 30) {
+
+  if (text.split(/\s+/).filter(w => w.length > 0).length < 10) {
     alert('Please write your paragraph first — it needs to be at least 5 sentences!');
     return;
   }
 
   const btn = document.getElementById('gradeBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="grade-spinner"></span> AI is reading your paragraph…';
-
   const resultBox = document.getElementById('grader-result');
   resultBox.classList.remove('show');
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: `You are a friendly 7th grade Social Studies writing coach. You are grading a student paragraph about direct vs. representative democracy. 
+  // ── RUN ALL CHECKS ──
+  const results = PARA_CHECKS.map(check => ({
+    ...check,
+    passed: check.test(text)
+  }));
 
-Evaluate the paragraph on these criteria:
-1. OPINION STATED: Does the student clearly say which type of democracy they think is better (direct OR representative)? 
-2. REASONS: Does the student give at least 2 specific reasons supporting their opinion?
-3. SENTENCES: Does the paragraph have at least 5 sentences?
-4. VOCABULARY: Does the student use relevant content vocabulary? Look for words like: citizens, vote, elect, represent, laws, government, democracy, Athens, United States, Congress, republic, population, decision, leader, or similar social studies terms.
-5. CONNECTS TO CONTENT: Does the student reference facts or examples from the lesson (Athens, U.S. Congress, population size, etc.)?
+  const requiredChecks = results.filter(r => r.required);
+  const passedRequired = requiredChecks.filter(r => r.passed).length;
+  const totalRequired  = requiredChecks.length;
+  const bonusPassed    = results.filter(r => !r.required && r.passed).length;
 
-Score the paragraph 0–20 points total:
-- Opinion clearly stated: 0–4 pts
-- 2+ specific reasons: 0–6 pts  
-- 5+ sentences: 0–4 pts
-- Vocabulary used: 0–3 pts
-- Content connection: 0–3 pts
+  // Pass = all required checks met
+  const passed = passedRequired === totalRequired;
 
-A paragraph PASSES if it scores 13 or higher out of 20.
+  // Score out of 20: required (up to 18) + bonus (2)
+  paragraphScore = Math.round((passedRequired / totalRequired) * 18) + (bonusPassed * 2);
+  paragraphScore = Math.min(20, paragraphScore);
 
-Respond ONLY with valid JSON, no markdown, no preamble:
-{
-  "score": <number 0-20>,
-  "passed": <true or false>,
-  "emoji": "<one emoji representing the grade: ✅ for pass, 🔄 for close, ❌ for needs work>",
-  "headline": "<short 5-8 word encouraging headline>",
-  "feedback": "<2-3 friendly sentences of specific feedback, written directly to the student using 'you' and 'your'. Be encouraging and specific.>",
-  "checklist": [
-    {"label": "Opinion clearly stated", "met": <true/false>, "note": "<brief note>"},
-    {"label": "2 or more reasons given", "met": <true/false>, "note": "<brief note>"},
-    {"label": "At least 5 sentences", "met": <true/false>, "note": "<brief note>"},
-    {"label": "Vocabulary words used", "met": <true/false>, "note": "<brief note>"},
-    {"label": "Connected to lesson examples", "met": <true/false>, "note": "<brief note>"}
-  ],
-  "hint": "<Only if passed=false: 1-2 specific sentences telling the student exactly what to add or improve. Be kind and concrete. Start with 'Try adding...' or 'Strengthen your paragraph by...'>",
-  "revise_prompt": "<Only if passed=false: A single sentence the student could use as a starting point to add a missing reason or example.>"
-}`,
-        messages: [{ role: 'user', content: `Here is a 7th grade student's paragraph:\n\n"${text}"` }]
-      })
-    });
+  // First failing required check = the hint to show
+  const firstFail = results.find(r => r.required && !r.passed);
 
-    const data = await response.json();
-    const raw = data.content[0].text.replace(/```json|```/g,'').trim();
-    const grade = JSON.parse(raw);
+  // ── RENDER RESULTS ──
+  document.getElementById('grade-emoji').textContent = passed ? '✅' : (passedRequired >= totalRequired - 1 ? '🔄' : '❌');
 
-    // Render result
-    document.getElementById('grade-emoji').textContent = grade.emoji;
-    const labelEl = document.getElementById('grade-label');
-    labelEl.textContent = grade.headline;
-    labelEl.className = 'grade-label ' + (grade.passed ? 'pass' : 'fail');
+  const labelEl = document.getElementById('grade-label');
+  if (passed) {
+    labelEl.textContent = 'Great paragraph! You\'re ready to submit.';
+    labelEl.className = 'grade-label pass';
+  } else if (passedRequired >= totalRequired - 1) {
+    labelEl.textContent = 'Almost there — just one more thing!';
+    labelEl.className = 'grade-label fail';
+  } else {
+    labelEl.textContent = 'Keep going — you can do this!';
+    labelEl.className = 'grade-label fail';
+  }
 
-    document.getElementById('grade-feedback').textContent = grade.feedback;
+  // Feedback sentence
+  const feedbackEl = document.getElementById('grade-feedback');
+  if (passed) {
+    feedbackEl.textContent = 'You stated your opinion clearly, backed it up with reasons, used vocabulary words, and wrote enough sentences. Well done!';
+  } else {
+    feedbackEl.textContent = 'Check the list below to see what your paragraph still needs. Fix the ❌ items and click Check again!';
+  }
 
-    // Checklist
-    const list = document.getElementById('grade-checklist');
-    list.innerHTML = '';
-    grade.checklist.forEach(item => {
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="check-icon">${item.met ? '✅' : '❌'}</span><span><strong>${item.label}:</strong> ${item.note}</span>`;
-      list.appendChild(li);
-    });
+  // Checklist
+  const list = document.getElementById('grade-checklist');
+  list.innerHTML = '';
+  results.forEach(item => {
+    const li = document.createElement('li');
+    const icon = item.passed ? '✅' : (item.required ? '❌' : '⭐');
+    const label = item.required ? item.label : item.label + ' <em style="font-weight:400;font-size:0.85em;">(bonus)</em>';
+    li.innerHTML = `<span class="check-icon">${icon}</span><span><strong>${label}</strong></span>`;
+    list.appendChild(li);
+  });
 
-    // Hint
-    const hintEl = document.getElementById('grade-hint');
-    if (!grade.passed && grade.hint) {
-      hintEl.style.display = 'block';
-      hintEl.innerHTML = `💡 <strong>How to improve:</strong> ${grade.hint}${grade.revise_prompt ? '<br><br>📝 <strong>Try this sentence:</strong> <em>' + grade.revise_prompt + '</em>' : ''}`;
-      speakText(grade.hint);
-    } else {
-      hintEl.style.display = 'none';
-    }
+  // Hint — show only the first failing required item
+  const hintEl = document.getElementById('grade-hint');
+  if (!passed && firstFail) {
+    hintEl.style.display = 'block';
+    hintEl.innerHTML = `💡 <strong>What to fix next:</strong> ${firstFail.hint}`;
+    speakText(firstFail.hint);
+  } else {
+    hintEl.style.display = 'none';
+  }
 
-    resultBox.classList.add('show');
+  resultBox.classList.add('show');
 
-    // Store score
-    paragraphScore = grade.score;
+  if (passed) {
+    paragraphPassed = true;
+    document.getElementById('passed-stamp').classList.add('show');
+    document.getElementById('qb13').classList.remove('paragraph-locked');
+    document.getElementById('qb13').classList.add('paragraph-passed');
 
-    if (grade.passed) {
-      paragraphPassed = true;
-      document.getElementById('passed-stamp').classList.add('show');
-      document.getElementById('qb13').classList.remove('paragraph-locked');
-      document.getElementById('qb13').classList.add('paragraph-passed');
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = false;
+    submitBtn.style.opacity = '1';
+    submitBtn.style.cursor = 'pointer';
+    submitBtn.textContent = '📤 Submit Worksheet';
 
-      const submitBtn = document.getElementById('submitBtn');
-      submitBtn.disabled = false;
-      submitBtn.style.opacity = '1';
-      submitBtn.style.cursor = 'pointer';
-      submitBtn.textContent = '📤 Submit Worksheet';
-
-      btn.textContent = '✅ Paragraph Approved!';
-      btn.style.background = 'linear-gradient(135deg, #1e8449, #117a34)';
-      speakText('Great job! Your paragraph is approved. You can now submit your worksheet.');
-    } else {
-      document.getElementById('qb13').classList.add('paragraph-locked');
-      btn.disabled = false;
-      btn.textContent = '🔄 Re-Check After Revising';
-      btn.style.background = '';
-    }
-
-  } catch(err) {
-    console.error(err);
+    btn.textContent = '✅ Paragraph Approved!';
+    btn.style.background = 'linear-gradient(135deg, #1e8449, #117a34)';
+    speakText('Great job! Your paragraph is approved. You can now submit your worksheet.');
+  } else {
+    document.getElementById('qb13').classList.add('paragraph-locked');
     btn.disabled = false;
-    btn.textContent = '🤖 Check My Paragraph with AI';
-    alert('Could not connect to the AI grader. Please try again.');
+    btn.textContent = '🔄 Re-Check After Revising';
+    btn.style.background = '';
   }
 }
 
